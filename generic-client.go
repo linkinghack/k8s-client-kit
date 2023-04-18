@@ -61,7 +61,7 @@ func (c *GenericK8sClient) GetRuntimeCluster() cluster.Cluster {
 
 // Add a new api-group scheme to this client
 // `gv` 和 `addSchemeFunc` 必须来自同一API package
-func (c *GenericK8sClient) AddScheme(gv *schema.GroupVersion, addSchemeFunc func(*runtime.Scheme)) {
+func (c *GenericK8sClient) AddScheme(gv *schema.GroupVersion, addSchemeFunc func(s *runtime.Scheme) error) {
 	c.schemeLock.Lock()
 	defer c.schemeLock.Unlock()
 
