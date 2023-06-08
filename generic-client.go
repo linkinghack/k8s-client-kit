@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -82,10 +83,9 @@ func (c *GenericK8sClient) Stop() {
 }
 
 // newGenericK8sClientWithKubeConfigObj 使用指定的kube config实例创建GenericK8sClient
-func newGenericK8sClientWithKubeConfigObj(id, authType string, config *clientcmdapi.Config) (*GenericK8sClient, error) {
-
+func newGenericK8sClientWithKubeConfigObj(id, authType string, config *clientcmdapi.Config, timeout *time.Duration) (*GenericK8sClient, error) {
 	// 构建rest client config
-	clientConfig := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{})
+	clientConfig := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{Timeout: timeout.String()})
 	restClientConfig, err := clientConfig.ClientConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "使用clientcmdapi.Config方式构建rest client config失败")
@@ -204,7 +204,12 @@ func newGenericK8sClientWithRestConfig(id, authType string, config *rest.Config)
 //	apiServerUrl: 目标apiserver的访问地址，如`https://cluster-1.dc1.example.com:6443`, 或`https://10.2.0.121:6443`
 //	optionalTLSServerName: 用于校验服务端证书是否与此名称一致，默认同APIServerURL保持一致; 同时也影响TLS SNI, 在client hello 中将传递给server
 //	caPem: PEM编码的信任CA，应该设置为目标APIServer的CA证书
-func NewGenericK8sClientWithToken(id, apiServerUrl, token string, caPem []byte, optionalTLSServerName string, skipTLSVerify bool) (*GenericK8sClient, error) {
+func NewGenericK8sClientWithToken(id, apiServerUrl, token string, caPem []byte, optionalTLSServerName string, skipTLSVerify bool, timeout *time.Duration) (*GenericK8sClient, error) {
+	if timeout == nil {
+		var to = 30 * time.Second
+		timeout = &to
+	}
+
 	// 准备kubeconfig模板
 	config := clientcmdapi.NewConfig()
 	config.Clusters["cluster"] = &clientcmdapi.Cluster{
@@ -225,10 +230,14 @@ func NewGenericK8sClientWithToken(id, apiServerUrl, token string, caPem []byte, 
 	}
 	config.CurrentContext = "cluster"
 
-	return newGenericK8sClientWithKubeConfigObj(id, AuthTypeToken, config)
+	return newGenericK8sClientWithKubeConfigObj(id, AuthTypeToken, config, timeout)
 }
 
-func NewGenericK8sClientWithSecretDir(id, authSecretDir, apiServerUrl, sni string) (*GenericK8sClient, error) {
+func NewGenericK8sClientWithSecretDir(id, authSecretDir, apiServerUrl, sni string, timeout *time.Duration) (*GenericK8sClient, error) {
+	if timeout == nil {
+		var to = 30 * time.Second
+		timeout = &to
+	}
 	// 读取目标目录中认证信息
 	// 通常应该包含几个文本文件：ca.crt, namespace, token
 	dir := strings.TrimSuffix(authSecretDir, "/")
@@ -242,7 +251,7 @@ func NewGenericK8sClientWithSecretDir(id, authSecretDir, apiServerUrl, sni strin
 		return nil, errors.Wrap(err, "无法读取Token文件:"+dir+"token")
 	}
 
-	return NewGenericK8sClientWithToken(id, apiServerUrl, string(token), caCert, sni, false)
+	return NewGenericK8sClientWithToken(id, apiServerUrl, string(token), caCert, sni, false, timeout)
 }
 
 // NewGenericK8sClientWithKubeConfigBytes 使用指定的KubeConfig bytes创建K8sClient
@@ -252,7 +261,11 @@ func NewGenericK8sClientWithSecretDir(id, authSecretDir, apiServerUrl, sni strin
 // Kubeconfig中cluster server支持使用IP地址端口方式指定可保证正确访问到的路由，若目标ApiServer在TLS SNI代理服务器之后，
 // 可以通过指定overrideServerName来使代理服务器正常工作。
 // 另外可选的方式是在部署k8s-provisioner时外部环境中解决域名解析问题，则可以直接在kubeconfig中使用域名方式指定APIServer地址。
-func NewGenericK8sClientWithKubeConfigBytes(id string, kubeConfig []byte, overrideSNIServerName string) (*GenericK8sClient, error) {
+func NewGenericK8sClientWithKubeConfigBytes(id string, kubeConfig []byte, overrideSNIServerName string, timeout *time.Duration) (*GenericK8sClient, error) {
+	if timeout == nil {
+		var to = 30 * time.Second
+		timeout = &to
+	}
 	clientConfig, err := clientcmd.NewClientConfigFromBytes(kubeConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "无法使用指定KubeConfig bytes创建client config")
@@ -266,15 +279,21 @@ func NewGenericK8sClientWithKubeConfigBytes(id string, kubeConfig []byte, overri
 		// 覆盖TLS ServerName
 		config.ServerName = overrideSNIServerName
 	}
+	config.Timeout = *timeout
 	return newGenericK8sClientWithRestConfig(id, AuthTypeKubeConfigBytes, config)
 }
 
 // NewGenericK8sClientInCluster 使用当前集群SA创建K8sClient. 仅在Kubernetes集群内部署时可用
-func NewGenericK8sClientInCluster(id string) (*GenericK8sClient, error) {
+func NewGenericK8sClientInCluster(id string, timeout *time.Duration) (*GenericK8sClient, error) {
+	if timeout == nil {
+		var to = 30 * time.Second
+		timeout = &to
+	}
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "无法从使用集群内配置(挂载的ServiceAccount token)构建rest client")
 	}
 
+	config.Timeout = *timeout
 	return newGenericK8sClientWithRestConfig(id, AuthTypeInCluster, config)
 }
