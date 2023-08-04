@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -45,6 +46,8 @@ type GenericK8sClient struct {
 	standardClient *kubernetes.Clientset
 	// 用于通用对象的客户端单例
 	dynamicClient dynamic.Interface
+	// K8s metrics API client
+	metricsClient metricsclient.Interface
 
 	// scheme register lock
 	schemeLock *sync.Mutex
@@ -58,6 +61,9 @@ func (c *GenericK8sClient) GetStandardClient() *kubernetes.Clientset {
 }
 func (c *GenericK8sClient) GetRuntimeCluster() cluster.Cluster {
 	return c.runtimeCluster
+}
+func (c *GenericK8sClient) GetMetricsClient() metricsclient.Interface {
+	return c.metricsClient
 }
 
 // Add a new api-group scheme to this client
@@ -91,54 +97,12 @@ func newGenericK8sClientWithKubeConfigObj(id, authType string, config *clientcmd
 		return nil, errors.Wrap(err, "使用clientcmdapi.Config方式构建rest client config失败")
 	}
 
-	// dynamic client
-	dc, err := dynamic.NewForConfig(restClientConfig)
+	cli, err := newGenericK8sClientWithRestConfig(id, authType, restClientConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "创建dynamic client失败")
+		return nil, err
 	}
-
-	// standard client
-	sc, err := kubernetes.NewForConfig(restClientConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "创建standard client失败")
-	}
-
-	// controller-runtime Client
-	// mgr, err := manager.New(restClientConfig, manager.Options{})
-	// if err != nil {
-	// 	logger.WithError(err).Debug("无法创建runtime-controller.Manager")
-	// 	return nil, errors.Wrap(err, "创建runtime-controller.Manager失败")
-	// }
-
-	opt := manager.Options{}
-	clusterCli, err := cluster.New(restClientConfig, func(clusterOptions *cluster.Options) {
-		clusterOptions.Scheme = opt.Scheme
-		clusterOptions.MapperProvider = opt.MapperProvider
-		clusterOptions.Logger = opt.Logger
-		clusterOptions.SyncPeriod = opt.SyncPeriod
-		clusterOptions.Namespace = opt.Namespace
-		clusterOptions.NewCache = opt.NewCache
-		clusterOptions.NewClient = opt.NewClient
-		clusterOptions.ClientDisableCacheFor = opt.ClientDisableCacheFor
-		clusterOptions.DryRunClient = opt.DryRunClient
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "创建runtime-controller.Cluster")
-	}
-
-	mgrCtx, stop := context.WithCancel(context.Background()) // runtime clusterCli 后台管理context
-	return &GenericK8sClient{
-		TargetK8sApiServerId: id,
-		AuthType:             authType,
-		kubeConfig:           config,
-		restConfig:           restClientConfig,
-		standardClient:       sc,
-		dynamicClient:        dc,
-		runtimeCluster:       clusterCli,
-		mgrCtx:               mgrCtx,
-		stopMgr:              stop,
-		schemeLock:           &sync.Mutex{},
-	}, nil
+	cli.kubeConfig = config
+	return cli, nil
 }
 
 // newGenericK8sClientWithRestConfig 使用rest client config 创建K8sClient
@@ -158,6 +122,12 @@ func newGenericK8sClientWithRestConfig(id, authType string, config *rest.Config)
 	_, err = sc.ServerVersion()
 	if err != nil {
 		return nil, errors.Wrap(err, "无法连接到集群")
+	}
+
+	// metrics client
+	metricsCli, err := metricsclient.NewForConfig(config)
+	if err != nil {
+		return nil, errors.Wrap(err, "无法创建metrics client")
 	}
 
 	// controller-runtime Client
@@ -189,6 +159,7 @@ func newGenericK8sClientWithRestConfig(id, authType string, config *rest.Config)
 		AuthType:             authType,
 		kubeConfig:           nil,
 		restConfig:           config,
+		metricsClient:        metricsCli,
 		standardClient:       sc,
 		dynamicClient:        dc,
 		mgrCtx:               mgrCtx,
