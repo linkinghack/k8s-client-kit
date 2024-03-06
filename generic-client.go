@@ -142,12 +142,8 @@ func newGenericK8sClientWithRestConfig(id, authType string, config *rest.Config)
 		clusterOptions.Scheme = opt.Scheme
 		clusterOptions.MapperProvider = opt.MapperProvider
 		clusterOptions.Logger = opt.Logger
-		clusterOptions.SyncPeriod = opt.SyncPeriod
-		clusterOptions.Namespace = opt.Namespace
 		clusterOptions.NewCache = opt.NewCache
 		clusterOptions.NewClient = opt.NewClient
-		clusterOptions.ClientDisableCacheFor = opt.ClientDisableCacheFor
-		clusterOptions.DryRunClient = opt.DryRunClient
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "创建runtime-controller.Cluster")
